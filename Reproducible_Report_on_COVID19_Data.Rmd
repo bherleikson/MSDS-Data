@@ -308,6 +308,12 @@ US_tot_w_pred %>% ggplot() +
 
 Given the information from our summary and the model, there would be a very weak linear relationship between deaths_per_thou and cases_per_thou. This could be due to the increased variability noticed earlier in the graphs.
 
+## Conclusion
+
+Conclusions about the data are written throughout.
+
+There are biases when it comes to gathering the data and the need to gather data as the COVID-19 became less of a national issue.
+
 ```{r sessioninfo}
 sessionInfo()
 ```
