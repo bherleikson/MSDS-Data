@@ -1,0 +1,313 @@
+---
+title: "Reproducible Report on COVID19 Data"
+date: "2023-08-21"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+The Coronavirus disease 2019 aka COVID-19 is a disease that has been plaguing the world since it's first confirmed cases in late 2019. To better understand the challenges the world faced as a result of the COVID-19 pandemic, researchers have endeavored to build accurate data to analyze patterns. Johns Hopkins University therefore created a repository of COVID-19 data and continued to update the information until March 10, 2023.  This data includes information regarding confirmed global and USA cases and deaths from many reliable resources to be found at: <https://github.com/CSSEGISandData/COVID-19/>. In this report, we will look at the data on COVID-19 cases and deaths to explore patterns and trends to gain insights on regional differences.
+
+## Import Data
+
+To start, the following packages need to be installed: 'tidyverse'
+
+```{r packages, include = FALSE}
+library(tidyverse)
+```
+
+Obtain the data from the four main csv files urls.
+
+```{r get_jhu_data}
+# Get current Data in the four files
+# they all begin the same way
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+file_names <- c("time_series_covid19_confirmed_global.csv", 
+                "time_series_covid19_deaths_global.csv", 
+                "time_series_covid19_confirmed_US.csv", 
+                "time_series_covid19_deaths_US.csv")
+urls <- str_c(url_in, file_names)
+```
+
+Read in the data from the urls.
+
+```{r import_data, message = FALSE}
+global_cases <- read_csv(urls[1])
+global_deaths <- read_csv(urls[2])
+US_cases <- read_csv(urls[3])
+US_deaths <- read_csv(urls[4])
+```
+
+## Tidy Data
+
+Tidy global_cases and global_deaths datasets by making each variable (date, cases, deaths) in their own column.
+Remove Lat and Long as they are not needed for the analysis.
+Combine global_cases and global_deaths into one dataset: global.
+Rename Province/State and Country/Region to Province_State and Country_Region.
+Filter global to not include areas that had zero cases.
+
+```{r tidy_global_data}
+global_cases <- global_cases %>% 
+  pivot_longer(cols = -c('Province/State', 'Country/Region', Lat, Long), 
+               names_to = "date", 
+               values_to = "cases") %>% 
+  select(-c(Lat, Long))
+
+global_deaths <- global_deaths %>% 
+  pivot_longer(cols = -c('Province/State', 'Country/Region', Lat, Long), 
+               names_to = "date", 
+               values_to = "deaths") %>% 
+  select(-c(Lat, Long))
+
+global <- global_cases %>%
+  full_join(global_deaths) %>% 
+  rename(Country_Region = `Country/Region`, 
+         Province_State = `Province/State`) %>%
+  mutate(date = mdy(date))
+
+global <- global %>% filter(cases > 0)
+
+global
+```
+
+Tidy US_cases and US_deaths datasets by making each variable (date, cases, deaths) in their own column.
+Keep only variables: Admin2, Province_State, Country_Region, Combined_Key, date, cases, Population, death.
+Change variable date to type date.
+Combine US_cases and US_deaths into one dataset: US.
+
+```{r tidy_US_data}
+US_cases <- US_cases %>% 
+  pivot_longer(cols = -(UID:Combined_Key), 
+               names_to = "date", 
+               values_to = "cases") %>% 
+  select(Admin2:cases) %>% 
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long_))
+
+US_deaths <- US_deaths %>% 
+  pivot_longer(cols = -(UID:Population), 
+               names_to = "date", 
+               values_to = "deaths") %>% 
+  select(Admin2:deaths) %>% 
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long_))
+
+US <- US_cases %>%
+  full_join(US_deaths)
+
+US
+```
+
+Add Combined_Key variable for Province_State and Country_Region.
+Obtain data about the population from each location from the Johns Hopkins University data sets.
+Read in the population data.
+Combine the data with the global dataset so that Population is now included.
+
+``` {r global_population_add}
+global <- global %>% 
+  unite("Combined_Key",
+        c(Province_State, Country_Region),
+        sep = ", ",
+        na.rm = TRUE,
+        remove = FALSE)
+
+uid_lookup_url <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/UID_ISO_FIPS_LookUp_Table.csv"
+
+uid <- read_csv(uid_lookup_url) %>%
+  select(-c(Lat, Long_, Combined_Key, code3, iso2, iso3, Admin2))
+
+global <- global %>%
+  left_join(uid, by = c("Province_State", "Country_Region")) %>%
+  select(Province_State, Country_Region, date, 
+         cases, deaths, Population, 
+         Combined_Key)
+
+global
+```
+
+## Analyze Data
+
+#### Visualize Data
+
+Looking at the US data, first group by Province_State, Country_Region, and data.  Then, summarize the cases, deaths, and Population for each state to see the totals without county breakdown.  Add a column showing the deaths per million.
+
+``` {r state_summaries}
+US_by_state <- US %>%
+  group_by(Province_State, Country_Region, date) %>%
+  summarize(cases = sum(cases), deaths = sum(deaths), 
+            Population = sum(Population)) %>%
+  mutate(deaths_per_mill = deaths *1000000 / Population) %>%
+  select(Province_State, Country_Region, date,
+         cases, deaths, deaths_per_mill, Population) %>%
+  ungroup()
+
+US_by_state
+```
+
+Next, look at the totals for the US as a whole using the same method.
+
+``` {r US_summaries}
+US_totals <- US_by_state %>%
+  group_by(Country_Region, date) %>% 
+  summarize(cases = sum(cases), deaths = sum(deaths),
+            Population = sum(Population)) %>%
+  mutate(deaths_per_mill = deaths *1000000 / Population) %>% 
+  select(Country_Region, date,
+         cases, deaths, deaths_per_mill, Population) %>%
+  ungroup()
+
+US_totals
+```
+
+Look at the most recent dates for US totals to see the totals at the end when Johns Hopkins University stopped recording.
+
+``` {r US_summaries_most_recent}
+tail(US_totals)
+```
+
+Visualize the data as a graph with dates on the x axis and numbers of cases/deaths on the y axis scaled to a log scale as not to lose all the details.
+
+``` {r US_totals_graph_date_by_cases}
+US_totals %>%
+  filter(cases > 0) %>% 
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "cases")) + 
+  geom_point(aes(color = "cases")) +
+  geom_line(aes(y = deaths, color = "deaths")) +
+  geom_point(aes(y = deaths, color = "deaths")) + 
+  scale_y_log10() +
+  theme(legend.position = "bottom", 
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 in US", y = NULL)
+```
+
+This shows a sharp rise in both cases and deaths in the early part of 2020 and then leveling out to a slower increase toward the second half of 2020 to the end of recordings in early 2023.
+
+Next, visualize the data from Massachusetts as a graph with dates on the x axis and numbers of cases/deaths on the y axis scaled to a log scale as not to lose all the details.
+
+``` {r MA_totals_graph_date_by_cases, warning = FALSE}
+state <- "Massachusetts"
+US_by_state %>%
+  filter(Province_State == state) %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "cases")) + 
+  geom_point(aes(color = "cases")) +
+  geom_line(aes(y = deaths, color = "deaths")) +
+  geom_point(aes(y = deaths, color = "deaths")) + 
+  scale_y_log10() +
+  theme(legend.position = "bottom", 
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = str_c("COVID19 in ",  state), y = NULL)
+```
+
+Like the US as a total, this shows an initial sharp rise in both cases and deaths in early 2020.  However, unlike the US totals, there are more noticeable increases in cases at the end of the years in 2020 and 2021.  This might be due to onset of colder climates.
+
+In order to investigate further whether cases level off with time, create new variables new_cases and new_deaths which show the change from one date to the next.  Do this for both state and US totals.
+
+``` {r create_new_cases}
+US_by_state <- US_by_state %>%
+  mutate(new_cases = cases - lag(cases),
+         new_deaths = deaths - lag(deaths))
+US_totals <- US_totals %>%
+  mutate(new_cases = cases - lag(cases), 
+         new_deaths = deaths - lag(deaths))
+```
+
+Visualize the US total data as a graph with dates on the x axis and numbers of new cases/deaths on the y axis scaled to a log scale as not to lose all the details.
+
+``` {r US_totals_graph_date_by_new_cases, warning = FALSE}
+US_totals %>%
+  ggplot(aes(x = date, y = new_cases)) +
+  geom_line(aes(color = "new_cases")) + 
+  geom_point(aes(color = "new_cases")) +
+  geom_line(aes(y = new_deaths, color = "new_deaths")) +
+  geom_point(aes(y = new_deaths, color = "new_deaths")) + 
+  scale_y_log10() +
+  theme(legend.position = "bottom", 
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 in US", y = NULL)
+```
+
+This better conveys the information about cases and deaths as totals become hard to read with larger numbers.  Looking at the graph, the data shows the same leveling off illustrated by the totals but with more discernible decreases and increases.  Also, as time progresses, consistency with increases and decreases from date to date becomes more volatile.
+
+As before, repeat the process for Massachusetts.  Visualize the state total data for Massachusetts as a graph with dates on the x axis and numbers of new cases/deaths on the y axis scaled to a log scale as not to lose all the details.
+
+``` {r MA_totals_graph_date_by_new_cases, warning = FALSE}
+state <- "Massachusetts"
+US_by_state %>%
+  filter(Province_State == state) %>%
+  ggplot(aes(x = date, y = new_cases)) +
+  geom_line(aes(color = "new_cases")) + 
+  geom_point(aes(color = "new_cases")) +
+  geom_line(aes(y = new_deaths, color = "new_deaths")) +
+  geom_point(aes(y = new_deaths, color = "new_deaths")) + 
+  scale_y_log10() +
+  theme(legend.position = "bottom", 
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = str_c("COVID19 in ",  state), y = NULL)
+```
+
+Like the US total graph for new cases, this better illustrates the information about case and death movement.  The graph shows the two increases at the end of 2020 and 2021 for both new cases and new deaths. It also reinforces the variability from date to date in 2022 and the beginning of 2023. 
+
+After looking at Massachusetts, investigate the states with the lowest and highest deaths per thousand people.
+
+Summarize the max deaths, cases, and population by state.  Divide cases and deaths by the population and multiply by 1000 to see the max deaths per thousand.  Filter out cases less than or equal to zero.
+
+``` {r create_state_max_cases_by_thou}
+US_state_totals <- US_by_state %>%
+  group_by(Province_State) %>%
+  summarize(deaths = max(deaths), cases = max(cases),
+            population = max(Population), 
+            cases_per_thou = 1000* cases / population,
+            deaths_per_thou = 1000* deaths / population) %>%
+  filter(cases > 0, population > 0)
+```
+
+Show the ten states with the lowest deaths per thousand people.
+``` {r ten_lowest_deaths_per_thou}
+US_state_totals %>% 
+  slice_min(deaths_per_thou, n = 10) %>%
+  select(deaths_per_thou, cases_per_thou, everything())
+```
+
+Show the ten states with the highest deaths per thousand people.
+
+```{r ten_highest_deaths_per_thou}
+US_state_totals %>% 
+  slice_max(deaths_per_thou, n = 10) %>%
+  select(deaths_per_thou, cases_per_thou, everything())
+```
+
+#### Model Data
+
+Look to see if deaths per thousand and cases per thousand are linearly related.  Create a model and summarize results.
+
+``` {r compare_US_cases_per_thou}
+mod <- lm(deaths_per_thou ~ cases_per_thou, data = US_state_totals)
+summary(mod)
+```
+Then, we model the relation with cases_per_thou on the x axis and deaths_per_thou on the y axis.  The actual results with be in blue and the predicted results will be in red.
+
+``` {r model_US_cases_per_thou}
+US_state_totals %>% mutate(pred = predict(mod))
+US_tot_w_pred <- US_state_totals %>% mutate(pred = predict(mod))
+
+US_tot_w_pred %>% ggplot() +
+  geom_point(aes(x = cases_per_thou, y = deaths_per_thou), 
+             color = "blue") +
+  geom_point(aes(x = cases_per_thou, y = pred), 
+             color = "red")
+```
+
+Given the information from our summary and the model, there would be a very weak linear relationship between deaths_per_thou and cases_per_thou. This could be due to the increased variability noticed earlier in the graphs.
+
+```{r sessioninfo}
+sessionInfo()
+```

@@ -1,0 +1,204 @@
+---
+title: "NYPD Shooting Incident Data Report"
+output:
+  html_document: default
+  pdf_document: default
+date: "2023-08-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+New York City is the largest city in the United States of America and as such experiences many shooting cases.  To better understand the patterns behind the shootings and to help make positive changes in the city, the NYPD has kept a database on all recorded shootings going back to 2006.  In an effort to explore the relationships between variables recorded in this dataset, we narrow our focus to looking at the data surrounding the borough the incident took place and the sex of the victim.  The original data can be found by going to <https://catalog.data.gov/dataset/nypd-shooting-incident-data-historic>.
+
+## Import Data
+
+To start, the following packages need to be installed: 'tidyverse', 'stats'.
+
+```{r packages, include = FALSE}
+library(tidyverse)
+library(stats)
+```
+
+Obtain the data from the main csv file url.
+
+``` {r get_NYPD_data}
+url <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+```
+
+Read in the data from the url.
+
+```{r import_data, message = FALSE}
+shooting_incidents <- read_csv(url)
+```
+
+Display dataset.
+
+```{r display_dataset}
+shooting_incidents
+```
+
+## Tidy Data
+
+Keep only variables: OCCUR_DATE, BORO, VIC_SEX.
+
+```{r remove_variables}
+shooting_incidents <- shooting_incidents %>% 
+  select(c(OCCUR_DATE, BORO, VIC_SEX))
+shooting_incidents
+```
+
+Change datatype of variable OCCUR_DATE to date.
+
+```{r OCCUR_DATE_to_date}
+shooting_incidents <- shooting_incidents %>% 
+  mutate(OCCUR_DATE = mdy(OCCUR_DATE))
+```
+
+View unique values in each variable.
+
+```{r unique_values}
+unique(shooting_incidents$BORO)
+unique(shooting_incidents$VIC_SEX)
+```
+
+Remove values "U" from VIC_SEX as the number of instances are too small to work in later data.
+
+```{r filter_odd_value_incidents}
+shooting_incidents <- shooting_incidents %>% 
+  filter(VIC_SEX != "U")
+```
+
+Display dataset.
+
+```{r show_initial_dataset}
+shooting_incidents
+```
+
+## Anaylize Data
+
+
+Summarize the total number of shootings in each borough.
+
+``` {r summary_boro_totals}
+BORO_totals <- shooting_incidents %>%
+  group_by(BORO) %>% 
+  summarize(Total = n())
+
+BORO_totals
+```
+
+Create a bar graph for the total number of shootings in each borough.
+
+```{r bar_graph_boro_totals}
+BORO_totals %>%
+  ggplot(aes(x = BORO, y = Total)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Number of NYC Shooting Cases by Borough", y = NULL)
+```
+
+Summarize the total number of shootings by VIC_SEX.
+
+``` {r summary_VIC_SEX_totals}
+VIC_SEX_totals <- shooting_incidents %>%
+  group_by(VIC_SEX) %>% 
+  summarize(Total = n())
+
+VIC_SEX_totals
+```
+
+Create a bar graph for the total number of shootings by VIC_SEX.
+
+```{r bar_graph_VIC_SEX_totals}
+VIC_SEX_totals %>%
+  ggplot(aes(x = VIC_SEX, y = Total, fill=VIC_SEX)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Number of NYC Shooting Cases by Victim's Sex", y = NULL)
+```
+
+Before comparing the borough to the victim's gender, let's assume they are independence at test later with an alpha of 0.05.
+
+Create a stacked bar graph for the total number of shootings by BORO divided by VIC_SEX.
+
+```{r stacked_bar_graph_BORO_VIC_SEX}
+shooting_incidents %>%
+  group_by(BORO, VIC_SEX) %>% 
+  summarize(Total = n()) %>%
+  ungroup() %>%
+  ggplot(aes(x = BORO, y = Total, fill=VIC_SEX)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Number of NYC Shooting Cases by Borough by Victim's Sex", y = NULL)
+```
+
+Create a two-way table for BORO vs VIC_SEX.
+
+```{r two_way_table_BORO_VIC_SEX}
+BORO_VIC_SEX_table <- xtabs(~BORO+VIC_SEX, data = shooting_incidents)
+BORO_VIC_SEX_table
+```
+
+Create a two-way proportions table for BORO vs VIC_SEX.
+
+```{r two_way_prop_table_BORO_VIC_SEX}
+prop_BORO_VIC_SEX_table <- round(prop.table(BORO_VIC_SEX_table), 2)
+prop_BORO_VIC_SEX_table
+```
+
+Add margins to each table.
+
+```{r margins_to_tables}
+BORO_VIC_SEX_table_marg <- addmargins(BORO_VIC_SEX_table)
+BORO_VIC_SEX_table_marg
+prop_BORO_VIC_SEX_table_marg <- addmargins(prop_BORO_VIC_SEX_table)
+prop_BORO_VIC_SEX_table_marg
+```
+
+Create an expected table to test for independence.
+
+```{r expected_table_creation}
+expected_table <- BORO_VIC_SEX_table
+
+expected_table[1,1] <- 2615*(7934/27301)
+expected_table[2,1] <- 2615*(10927/27301)
+expected_table[3,1] <- 2615*(3570/27301)
+expected_table[4,1] <- 2615*(4094/27301)
+expected_table[5,1] <- 2615*(776/27301)
+
+expected_table[1,2] <- 24686*(7934/27301)
+expected_table[2,2] <- 24686*(10927/27301)
+expected_table[3,2] <- 24686*(3570/27301)
+expected_table[4,2] <- 24686*(4094/27301)
+expected_table[5,2] <- 24686*(776/27301)
+
+expected_table <- round(expected_table, 2)
+expected_table
+```
+
+Find the differences between the expected values and the data.
+
+```{r expected_subtr_orig}
+expected_table - BORO_VIC_SEX_table
+```
+
+Run a summary for the BORO vs VIC_SEX table.
+
+```{r summary_BORO_VIC_SEX_table}
+summary(BORO_VIC_SEX_table)
+```
+
+## Conclusion
+
+Looking at the graphs and tables we can conclude that the Bronx is the borough with the most shootings and Staten Island has the least.  When looking at the victims' sex after filtering out "U"s, more males than females have been victims of shootings by a large margin.  Males made up 90% while females made up 10%.  
+
+Then, we looked at the two-way data showing the distribution of victim sex across each borough.  It is difficult to tell if victim sex and borough are independent looking at the stacked bar graph so we made an expected table.  Comparing the expected table to the original two-way table shows that there are fewer identifying females shot in the Bronx than expected.  In running a summary on the original two-way table and testing for independence using the chi-squared test for independence we observe a p-value of 0.02359.  This is statistically significant under the common threshold of 0.05.  Therefore, we do have sufficient evidence to reject a null hypothesis that borough and victim's sex are independent.
+
+Some bias might be present in the collection of the data in that certain boroughs or  victims' sex could be under or over reported.  The "U"s that were filtered out from the variable VIC_SEX would be a form of bias as it was challenging on data collector or researcher on ascertaining further.  The data would also be improved by including missing persons as possible deaths.
+
+The research could be extended by analyzing more variables to see if there are lurking variables causing bias and impacting the relationship between borough and victim's sex.
+
+```{r sessioninfo}
+sessionInfo()
+```
